@@ -32,9 +32,11 @@ import Prelude.Compat
 import Control.Arrow                    (first)
 import Control.Monad                    (forM)
 import Control.Monad.Trans.State.Strict (runState, state)
+import Data.Foldable                    (for_)
 import Data.Functor.Compose             (Compose (..))
 import Data.Int                         (Int64)
 import Language.Haskell.TH
+import Language.Haskell.TH.Syntax       (qAddDependentFile)
 import System.Directory
        (doesDirectoryExist, getDirectoryContents)
 import System.FilePath                  (makeRelative, (</>))
@@ -44,6 +46,7 @@ import qualified Codec.Compression.Lzma  as LZMA
 import qualified Data.ByteString         as BS
 import qualified Data.ByteString.Lazy    as BSL
 import qualified Data.ByteString.Unsafe  as BS.Unsafe
+import qualified Data.Text               as T
 import qualified Data.Text.Lazy          as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 
@@ -82,6 +85,7 @@ lazyBytestringE lbs =
     $ BSL.fromStrict
     $ unsafePerformIO
     $ BS.Unsafe.unsafePackAddressLen $l $s
+    :: BSL.ByteString
     |]
   where
     bs = BSL.toStrict $ LZMA.compressWith params lbs
@@ -119,7 +123,9 @@ concatEntries xs = (bslEndo BSL.empty, ys)
 -- | Embed a @[('FilePath', 'Data.ByteString.ByteString')]@ list, traversing given directory.
 embedDir :: FilePath -> Q Exp
 embedDir topdir = do
-    pairs <- runIO $ fmap (makeAllRelative topdir) $ listDirectoryFiles topdir
+    pairs' <- runIO $ listDirectoryFiles topdir
+    for_ pairs' $ qAddDependentFile . fst
+    let pairs = makeAllRelative topdir pairs'
     embedPairs pairs
 
 embedPairs :: [(FilePath, BSL.ByteString)] -> Q Exp
@@ -129,8 +135,9 @@ embedPairs pairs = do
     let (bsl, Compose offsets) = concatEntries (Compose pairs)
     bslName <- newName "embedBsl"
     bslExpr <- lazyBytestringE bsl
-    letE [ return $ ValD (VarP bslName) (NormalB bslExpr) [] ] $
-        listE $ map (makeEmbeddedEntry bslName) offsets
+    let e = letE [ return $ ValD (VarP bslName) (NormalB bslExpr) [] ] $
+                listE $ map (makeEmbeddedEntry bslName) offsets
+    sigE e [t| [(FilePath, BS.ByteString)] |]
 
 -- | Embed a @[('FilePath', 'Data.ByteString.ByteString')]@ list, recursively traversing given directory path.
 --
@@ -143,7 +150,9 @@ embedPairs pairs = do
 -- @
 embedRecursiveDir :: FilePath -> Q Exp
 embedRecursiveDir topdir = do
-    pairs <- runIO $ fmap (makeAllRelative topdir) $ listRecursiveDirectoryFiles topdir
+    pairs' <- runIO $ listRecursiveDirectoryFiles topdir
+    for_ pairs' $ qAddDependentFile . fst
+    let pairs = makeAllRelative topdir pairs'
     embedPairs pairs
 
 -------------------------------------------------------------------------------
@@ -153,22 +162,24 @@ embedRecursiveDir topdir = do
 -- | Embed a lazy 'Data.ByteString.Lazy.ByteString' from a file.
 embedLazyByteString :: FilePath -> Q Exp
 embedLazyByteString fp = do
+    qAddDependentFile fp
     bsl <- runIO $ BSL.readFile fp
     lazyBytestringE bsl
 
 -- | Embed a strict 'Data.ByteString.ByteString' from a file.
 embedByteString :: FilePath -> Q Exp
-embedByteString fp = [| BSL.toStrict $(embedLazyByteString fp) |]
+embedByteString fp = [| BSL.toStrict $(embedLazyByteString fp) :: BS.ByteString |]
 
 -- | Embed a lazy 'Data.Text.Lazy.Text' from a UTF8-encoded file.
 embedLazyText :: FilePath -> Q Exp
 embedLazyText fp = do
+    qAddDependentFile fp
     bsl <- runIO $ BSL.readFile fp
     case TLE.decodeUtf8' bsl of
         Left e  -> reportError (show e)
         Right _ -> return ()
-    [| TLE.decodeUtf8 $ $(lazyBytestringE bsl) |]
+    [| TLE.decodeUtf8 $ $(lazyBytestringE bsl) :: TL.Text |]
 
 -- | Embed a strict 'Data.Text.Text' from a UTF8-encoded file.
 embedText :: FilePath -> Q Exp
-embedText fp = [| TL.toStrict $(embedLazyText fp) |]
+embedText fp = [| TL.toStrict $(embedLazyText fp) :: T.Text |]
