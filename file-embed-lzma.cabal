@@ -1,7 +1,7 @@
 cabal-version:       2.0
 name:                file-embed-lzma
 version:             0
-x-revision:          3
+x-revision:          2
 
 synopsis:            Use Template Haskell to embed (LZMA compressed) data.
 description:
