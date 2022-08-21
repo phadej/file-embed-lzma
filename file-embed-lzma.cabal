@@ -57,7 +57,6 @@ library
   -- non bundled dependencies
   build-depends:
       lzma               ^>=0.0.0.3
-    , th-lift-instances  ^>=0.1.11
 
   other-extensions:
     OverloadedStrings

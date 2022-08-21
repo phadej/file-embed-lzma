@@ -50,8 +50,6 @@ import qualified Data.Text               as T
 import qualified Data.Text.Lazy          as LT
 import qualified Data.Text.Lazy.Encoding as LTE
 
-import Instances.TH.Lift ()
-
 listRecursiveDirectoryFiles :: FilePath -> IO [(FilePath, LBS.ByteString)]
 listRecursiveDirectoryFiles = listDirectoryFilesF listRecursiveDirectoryFiles
 
