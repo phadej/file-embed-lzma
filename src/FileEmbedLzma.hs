@@ -1,6 +1,6 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes       #-}
-{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE CPP                   #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 ------------------------------------------------------------
 -- |
 -- Module      :  FileEmbedLzma
@@ -26,15 +26,13 @@ module FileEmbedLzma (
     lazyBytestringE,
     ) where
 
-import Prelude ()
-import Prelude.Compat
-
 import Control.Arrow                    (first)
 import Control.Monad                    (forM)
 import Control.Monad.Trans.State.Strict (runState, state)
 import Data.Foldable                    (for_)
 import Data.Functor.Compose             (Compose (..))
 import Data.Int                         (Int64)
+import Data.List                        (sort)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax       (qAddDependentFile)
 import System.Directory
@@ -50,7 +48,18 @@ import qualified Data.Text               as T
 import qualified Data.Text.Lazy          as LT
 import qualified Data.Text.Lazy.Encoding as LTE
 
-import Instances.TH.Lift ()
+#if MIN_VERSION_template_haskell(2,16,0)
+import qualified Data.ByteString.Internal as BS.Internal
+
+import Language.Haskell.TH.Syntax (Bytes (..))
+#endif
+
+-- $setup
+-- >>> :set -XTemplateHaskell -dppr-cols=9999
+-- >>> import qualified Data.ByteString.Lazy as LBS
+-- >>> import qualified Data.ByteString as BS
+-- >>> import qualified Data.Text.Lazy as LT
+-- >>> import qualified Data.Text as T
 
 listRecursiveDirectoryFiles :: FilePath -> IO [(FilePath, LBS.ByteString)]
 listRecursiveDirectoryFiles = listDirectoryFilesF listRecursiveDirectoryFiles
@@ -81,15 +90,15 @@ makeAllRelative topdir = map (first (("/" ++) . makeRelative topdir))
 -- Embedded value is compressed with LZMA.
 lazyBytestringE :: LBS.ByteString -> Q Exp
 lazyBytestringE lbs =
-    [| LZMA.decompress
-    $ LBS.fromStrict
-    $ unsafePerformIO
-    $ BS.Unsafe.unsafePackAddressLen $l $s
-    :: LBS.ByteString
-    |]
+    [| LZMA.decompress . LBS.fromStrict . unsafePerformIO |] `appE`
+    ([| BS.Unsafe.unsafePackAddressLen |] `appE` l `appE` s)
   where
     bs = LBS.toStrict $ LZMA.compressWith params lbs
+#if MIN_VERSION_template_haskell(2,16,0)
+    s = litE $ bytesPrimL $ bsToBytes bs
+#else
     s = litE $ stringPrimL $ BS.unpack bs
+#endif
     l = litE $ integerL $ fromIntegral $ BS.length bs
 
     params = LZMA.defaultCompressParams
@@ -99,9 +108,15 @@ lazyBytestringE lbs =
         }
         -}
 
+#if MIN_VERSION_template_haskell(2,16,0)
+bsToBytes :: BS.ByteString -> Bytes
+bsToBytes (BS.Internal.PS fptr off len) = Bytes fptr (fromIntegral off) (fromIntegral len)
+#endif
+
 makeEmbeddedEntry :: Name -> (FilePath, (Int64, Int64)) -> Q Exp
-makeEmbeddedEntry name (path, (off, len)) =
-    [| (path, LBS.toStrict $ LBS.take len $ LBS.drop off $(varE name)) |]
+makeEmbeddedEntry name (path, (off, len)) = do
+    let y = [| LBS.toStrict . LBS.take len . LBS.drop off |] `appE` varE name
+    [| (,) path |] `appE` y
 
 concatEntries :: Traversable t => t LBS.ByteString -> (LBS.ByteString, t (Int64, Int64))
 concatEntries xs = (bslEndo LBS.empty, ys)
@@ -148,11 +163,19 @@ embedPairs pairs = do
 -- -- is an embedded (no data-files!) equivalent of
 -- staticApp $ defaultFileServerSettings "static"
 -- @
+--
+--
+-- >>> $(embedRecursiveDir "example")
+-- [("/Example.hs","..."),("/example.txt","Hello from the inside.\n")]
+--
+-- >>> :t $(embedRecursiveDir "example")
+-- $(embedRecursiveDir "example") :: [(FilePath, BS.ByteString)]
+--
 embedRecursiveDir :: FilePath -> Q Exp
 embedRecursiveDir topdir = do
     pairs' <- runIO $ listRecursiveDirectoryFiles topdir
     for_ pairs' $ qAddDependentFile . fst
-    let pairs = makeAllRelative topdir pairs'
+    let pairs = sort (makeAllRelative topdir pairs')
     embedPairs pairs
 
 -------------------------------------------------------------------------------
@@ -160,6 +183,10 @@ embedRecursiveDir topdir = do
 -------------------------------------------------------------------------------
 
 -- | Embed a lazy 'Data.ByteString.Lazy.ByteString' from a file.
+--
+-- >>> :t $(embedLazyByteString "file-embed-lzma.cabal")
+-- $(embedLazyByteString "file-embed-lzma.cabal") :: LBS.ByteString
+--
 embedLazyByteString :: FilePath -> Q Exp
 embedLazyByteString fp = do
     qAddDependentFile fp
@@ -167,10 +194,18 @@ embedLazyByteString fp = do
     lazyBytestringE bsl
 
 -- | Embed a strict 'Data.ByteString.ByteString' from a file.
+--
+-- >>> :t $(embedByteString "file-embed-lzma.cabal")
+-- $(embedByteString "file-embed-lzma.cabal") :: BS.ByteString
+--
 embedByteString :: FilePath -> Q Exp
-embedByteString fp = [| LBS.toStrict $(embedLazyByteString fp) :: BS.ByteString |]
+embedByteString fp = [| LBS.toStrict |] `appE` embedLazyByteString fp
 
 -- | Embed a lazy 'Data.Text.Lazy.Text' from a UTF8-encoded file.
+--
+-- >>> :t $(embedLazyText "file-embed-lzma.cabal")
+-- $(embedLazyText "file-embed-lzma.cabal") :: LT.Text
+--
 embedLazyText :: FilePath -> Q Exp
 embedLazyText fp = do
     qAddDependentFile fp
@@ -178,8 +213,12 @@ embedLazyText fp = do
     case LTE.decodeUtf8' bsl of
         Left e  -> reportError (show e)
         Right _ -> return ()
-    [| LTE.decodeUtf8 $(lazyBytestringE bsl) :: LT.Text |]
+    [| LTE.decodeUtf8 |] `appE` lazyBytestringE bsl
 
 -- | Embed a strict 'Data.Text.Text' from a UTF8-encoded file.
+--
+-- >>> :t $(embedText "file-embed-lzma.cabal")
+-- $(embedText "file-embed-lzma.cabal") :: T.Text
+--
 embedText :: FilePath -> Q Exp
-embedText fp = [| LT.toStrict $(embedLazyText fp) :: T.Text |]
+embedText fp = [| LT.toStrict |] `appE` embedLazyText fp
