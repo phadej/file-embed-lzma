@@ -1,7 +1,6 @@
-{-# LANGUAGE CPP               #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes       #-}
-{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE CPP                   #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 ------------------------------------------------------------
 -- |
 -- Module      :  FileEmbedLzma
@@ -27,9 +26,6 @@ module FileEmbedLzma (
     lazyBytestringE,
     ) where
 
-import Prelude ()
-import Prelude.Compat
-
 import Control.Arrow                    (first)
 import Control.Monad                    (forM)
 import Control.Monad.Trans.State.Strict (runState, state)
@@ -50,8 +46,6 @@ import qualified Data.ByteString.Unsafe  as BS.Unsafe
 import qualified Data.Text               as T
 import qualified Data.Text.Lazy          as LT
 import qualified Data.Text.Lazy.Encoding as LTE
-
-import Instances.TH.Lift ()
 
 #if MIN_VERSION_template_haskell(2,16,0)
 import qualified Data.ByteString.Internal as BS.Internal
@@ -88,12 +82,8 @@ makeAllRelative topdir = map (first (("/" ++) . makeRelative topdir))
 -- Embedded value is compressed with LZMA.
 lazyBytestringE :: LBS.ByteString -> Q Exp
 lazyBytestringE lbs =
-    [| LZMA.decompress
-    $ LBS.fromStrict
-    $ unsafePerformIO
-    $ BS.Unsafe.unsafePackAddressLen $l $s
-    :: LBS.ByteString
-    |]
+    [| LZMA.decompress . LBS.fromStrict . unsafePerformIO |] `appE`
+    ([| BS.Unsafe.unsafePackAddressLen |] `appE` l `appE` s)
   where
     bs = LBS.toStrict $ LZMA.compressWith params lbs
 #if MIN_VERSION_template_haskell(2,16,0)
@@ -116,8 +106,9 @@ bsToBytes (BS.Internal.PS fptr off len) = Bytes fptr (fromIntegral off) (fromInt
 #endif
 
 makeEmbeddedEntry :: Name -> (FilePath, (Int64, Int64)) -> Q Exp
-makeEmbeddedEntry name (path, (off, len)) =
-    [| (path, LBS.toStrict $ LBS.take len $ LBS.drop off $(varE name)) |]
+makeEmbeddedEntry name (path, (off, len)) = do
+    let y = [| LBS.toStrict . LBS.take len . LBS.drop off |] `appE` varE name
+    [| (,) path |] `appE` y
 
 concatEntries :: Traversable t => t LBS.ByteString -> (LBS.ByteString, t (Int64, Int64))
 concatEntries xs = (bslEndo LBS.empty, ys)
@@ -184,7 +175,7 @@ embedLazyByteString fp = do
 
 -- | Embed a strict 'Data.ByteString.ByteString' from a file.
 embedByteString :: FilePath -> Q Exp
-embedByteString fp = [| LBS.toStrict $(embedLazyByteString fp) :: BS.ByteString |]
+embedByteString fp = [| LBS.toStrict |] `appE` embedLazyByteString fp
 
 -- | Embed a lazy 'Data.Text.Lazy.Text' from a UTF8-encoded file.
 embedLazyText :: FilePath -> Q Exp
@@ -194,8 +185,8 @@ embedLazyText fp = do
     case LTE.decodeUtf8' bsl of
         Left e  -> reportError (show e)
         Right _ -> return ()
-    [| LTE.decodeUtf8 $(lazyBytestringE bsl) :: LT.Text |]
+    [| LTE.decodeUtf8 |] `appE` lazyBytestringE bsl
 
 -- | Embed a strict 'Data.Text.Text' from a UTF8-encoded file.
 embedText :: FilePath -> Q Exp
-embedText fp = [| LT.toStrict $(embedLazyText fp) :: T.Text |]
+embedText fp = [| LT.toStrict |] `appE` embedLazyText fp
