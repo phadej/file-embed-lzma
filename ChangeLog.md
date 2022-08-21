@@ -7,6 +7,7 @@
   We no more depend on `th-lift-instances`,
   and use `TemplateHaskellQuotes` instead of `TemplateHaskell` for the lib
   itself.
+- `embedRecursiveDir` sorts files, so the generated code is more deterministic
 
 ## 0
 
