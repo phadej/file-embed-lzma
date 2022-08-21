@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE TemplateHaskell   #-}
@@ -52,6 +53,12 @@ import qualified Data.Text.Lazy.Encoding as LTE
 
 import Instances.TH.Lift ()
 
+#if MIN_VERSION_template_haskell(2,16,0)
+import qualified Data.ByteString.Internal as BS.Internal
+
+import Language.Haskell.TH.Syntax (Bytes (..))
+#endif
+
 listRecursiveDirectoryFiles :: FilePath -> IO [(FilePath, LBS.ByteString)]
 listRecursiveDirectoryFiles = listDirectoryFilesF listRecursiveDirectoryFiles
 
@@ -89,7 +96,11 @@ lazyBytestringE lbs =
     |]
   where
     bs = LBS.toStrict $ LZMA.compressWith params lbs
+#if MIN_VERSION_template_haskell(2,16,0)
+    s = litE $ bytesPrimL $ bsToBytes bs
+#else
     s = litE $ stringPrimL $ BS.unpack bs
+#endif
     l = litE $ integerL $ fromIntegral $ BS.length bs
 
     params = LZMA.defaultCompressParams
@@ -98,6 +109,11 @@ lazyBytestringE lbs =
         , LZMA.compressLevelExtreme = True
         }
         -}
+
+#if MIN_VERSION_template_haskell(2,16,0)
+bsToBytes :: BS.ByteString -> Bytes
+bsToBytes (BS.Internal.PS fptr off len) = Bytes fptr (fromIntegral off) (fromIntegral len)
+#endif
 
 makeEmbeddedEntry :: Name -> (FilePath, (Int64, Int64)) -> Q Exp
 makeEmbeddedEntry name (path, (off, len)) =
