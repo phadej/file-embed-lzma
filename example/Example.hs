@@ -9,6 +9,6 @@ import qualified Data.ByteString as BS
 
 main :: IO ()
 main = do
-    BS.putStr $(embedByteString "example/example.txt")
-    for_ $(embedRecursiveDir "example") $ \(n, bs) ->
+    BS.putStr $$(embedByteString "example/example.txt")
+    for_ $$(embedRecursiveDir "example") $ \(n, bs) ->
         print (n, BS.length bs)
