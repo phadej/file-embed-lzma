@@ -1,8 +1,10 @@
 # Revision history for file-embed-lzma
 
-## 0.0.2
+## 0.1
 
-- Support GHC-8.6.5...9.10.1
+- The default interface uses TTH (`Code`),
+  the previous untyped TH interface is in the `FileEmbedLzma.Untyped` module.
+- Support GHC-9.0.2...9.10.1
 
 ## 0.0.1
 
