@@ -196,7 +196,7 @@ embedLazyByteString fp = do
 -- | Embed a strict 'Data.ByteString.ByteString' from a file.
 --
 -- >>> :t $(embedByteString "file-embed-lzma.cabal")
--- $(embedByteString "file-embed-lzma.cabal") :: BS.ByteString
+-- $(embedByteString "file-embed-lzma.cabal") :: BS...ByteString
 --
 embedByteString :: FilePath -> Q Exp
 embedByteString fp = [| LBS.toStrict |] `appE` embedLazyByteString fp
@@ -218,7 +218,7 @@ embedLazyText fp = do
 -- | Embed a strict 'Data.Text.Text' from a UTF8-encoded file.
 --
 -- >>> :t $(embedText "file-embed-lzma.cabal")
--- $(embedText "file-embed-lzma.cabal") :: T.Text
+-- $(embedText "file-embed-lzma.cabal") :: T...Text
 --
 embedText :: FilePath -> Q Exp
 embedText fp = [| LT.toStrict |] `appE` embedLazyText fp
