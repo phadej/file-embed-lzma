@@ -1,5 +1,9 @@
 # Revision history for file-embed-lzma
 
+## 0.0.2
+
+- Support GHC-8.6.5...9.10.1
+
 ## 0.0.1
 
 - Use `bytesPrimL` when available
